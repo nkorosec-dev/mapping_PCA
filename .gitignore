@@ -1,31 +1,29 @@
-# Datasets
-Dataset/
-Datasets/
-data/
-
-# Build
 build/
-build*/
+buid/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
+compile_commands.json
 
-# Python
 .venv/
 venv/
 __pycache__/
 *.pyc
 
-# IDE
 .vscode/
 .idea/
 
-# Generated CSV
+Dataset/
+Datasets/
+
+*.o
+*.so
+*.exe
+
 measured.csv
 reference.csv
 plane_fit.csv
 monte_carlo_noise.csv
 
-# Temporary files
 *.log
-*.tmps
+*.tmp

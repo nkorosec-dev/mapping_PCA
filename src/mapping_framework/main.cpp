@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
+
 struct Result
 {
     double angleError;
@@ -34,7 +35,7 @@ int main()
     double rx = 6.1 * std::numbers::pi / 180.0;
     double ry = 12.3 * std::numbers::pi / 180.0;
 
-    auto generator = std::mt19937(42);
+    auto generator = std::mt19937(42); //random seed for gaussian noise
 
     Eigen::Vector3d trans(0.02, 0.13, 0.07);
 
@@ -45,6 +46,7 @@ int main()
 
     Eigen::Matrix3d R = Ry * Rx;
 
+
     TransformPoints(points, R, trans);
 
     auto reference = points;
@@ -53,9 +55,7 @@ int main()
 
     SaveCSV(reference, "reference.csv");
 
-    Result single = RunExperiment(
-        reference, trueNormal, 0.1, generator, true
-    );
+    //Result single = RunExperiment(reference, trueNormal, 0.1, generator, true);
 
     std::vector<double> sigmas = {0.0, 0.005, 0.01, 0.03, 0.05, 0.1};
 
@@ -64,7 +64,7 @@ int main()
     return 0;
     }
 
-std::vector<Eigen::Vector3d> PointGen(double step, int N)
+std::vector<Eigen::Vector3d> PointGen(double step, int N) //2D plane generate
 {
     std::vector<Eigen::Vector3d> points;
 
@@ -105,9 +105,9 @@ void SaveCSV(std::vector<Eigen::Vector3d> &points, const std::string filename)
 
 void AddGausNoise(std::vector<Eigen::Vector3d> &points, double sigma, std::mt19937 &generator)
 {
-    std::normal_distribution<double> noise(0.0, sigma);
+    std::normal_distribution<double> noise(0.0, sigma); 
 
-    for(auto &point : points)
+    for(auto &point : points) //dodam pseudoreandom sum
     {
         point.x() += noise(generator);
         point.y() += noise(generator);
@@ -118,11 +118,11 @@ void AddGausNoise(std::vector<Eigen::Vector3d> &points, double sigma, std::mt199
 
 Eigen::Vector3d CalcCentroid(const std::vector<Eigen::Vector3d> &points)
 {
-    Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
+    Eigen::Vector3d centroid = Eigen::Vector3d::Zero(); 
 
     for(const auto &point : points)
     {
-        centroid += point;
+        centroid += point; 
     }
 
     return centroid/static_cast<double>(points.size()); //povprecni polozaj vseh tock
@@ -137,10 +137,10 @@ Eigen::Matrix3d CalcCovariance(const std::vector<Eigen::Vector3d> &points, const
     {
         Eigen::Vector3d q = point - centroid; //q pove koliko je posamezna tocka odmaknjena od tezisca
 
-        C += q * q.transpose(); //zunanji produkt - kolk ima posamezna tocka prispevka
-    }
-
-    C /= static_cast<double>(points.size()); //kovariancna matrika
+        C += q * q.transpose(); //zunanji produkt - kolk ima posamezna tocka prispevka, varianca in kovarianca
+    
+    }    
+    C /= static_cast<double>(points.size()); //kovariancna matrika, poveprecje prispevka veh tock
 
     return C;
 }
@@ -151,40 +151,41 @@ double CalcRMSE(const std::vector<Eigen::Vector3d> &points, const Eigen::Vector3
 
     for (const auto &point : points)
     {
-        double error = normal.dot(point) + d;
-        sum += error*error;
+        double error = normal.dot(point) + d; //skalarni produkt normale in tocke - pove kam kazze vektor glede na drugega
+        sum += error*error; //kvadraten odmik - navadno povprecje bi dobili 0 - kvadrirano zato potem korenimo
     }
     
-    return std::sqrt(sum/ static_cast<double>(points.size()));
+    return std::sqrt(sum/ static_cast<double>(points.size())); //Root Mean Squared Error.
 }
 
 Result RunExperiment(const std::vector<Eigen::Vector3d> &reference, const Eigen::Vector3d &trueNormal, double sigma, std::mt19937 &generator, bool saveData)
 {
-    auto measured = reference;
+    auto measured = reference; //kopija
 
-    AddGausNoise(measured, sigma, generator);
+    AddGausNoise(measured, sigma, generator); //dodan šum
 
     if(saveData)
     {
         SaveCSV(measured, "measured.csv");
     }
 
+    auto estimated = CalcCentroid(measured); //tezisce izmerjene
+    auto actual = CalcCentroid(reference); //actual tezisce
 
-    auto estimated = CalcCentroid(measured);
-    auto actual = CalcCentroid(reference);
+    Eigen::Matrix3d C = CalcCovariance(measured, estimated); // kovarianca matrika
 
-    Eigen::Matrix3d C = CalcCovariance(measured, estimated);
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(C);
-    Eigen::Vector3d normal = solver.eigenvectors().col(0); //najmanj razpersenosti
+    //PCA rekonstrukcija
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(C); //lastni razcep simetricne kovariancne matrike - po velikosti zloozi lastne vektorje
+    Eigen::Vector3d normal = solver.eigenvectors().col(0); //najmanj razpersenosti v prvem stolpcu
 
-    double dot = std::abs(trueNormal.dot(normal));
-    dot = std::clamp(dot, 0.0, 1.0);
+    double dot = std::abs(trueNormal.dot(normal)); //skalarni produkt enotskih normal
+    dot = std::clamp(dot, 0.0, 1.0); //omejitev za acos()
 
-    double angleError = std::acos(dot) * 180.0 / std::numbers::pi;
+    double angleError = std::acos(dot) * 180.0 / std::numbers::pi; //kot med normalama
 
-    double d = -normal.dot(estimated);
+    double d = -normal.dot(estimated); //d polozaj ravninve glede na izhodisce
 
-    double rmse = CalcRMSE(measured, normal, d);
+    double rmse = CalcRMSE(measured, normal, d); 
 
     double centroidError = (estimated - actual).norm();
 
@@ -208,44 +209,35 @@ Result RunExperiment(const std::vector<Eigen::Vector3d> &reference, const Eigen:
 
 void MonteCarloNoise(const std::vector<Eigen::Vector3d>& reference, const Eigen::Vector3d& trueNormal, const std::vector<double>& sigmas, int iterations, std::mt19937& generator)
 {
-    if (iterations < 2)
-    {
-        std::cerr << "Monte Carlo requires at least 2 iterations.\n";
-        return;
-    }
-
     std::ofstream file("monte_carlo_noise.csv");
 
     file << "sigma,mean_angle,std_angle,mean_rmse,mean_centroid\n";
 
-    for (double sigma : sigmas)
+    for (double sigma : sigmas) // spreminja gaussov sum
     {
         double sumAngle = 0.0;
         double sumAngleSquared = 0.0;
         double sumRMSE = 0.0;
         double sumCentroid = 0.0;
 
-        for (int i = 0; i < iterations; i++)
+        for (int i = 0; i < iterations; i++) // rekonstrukcija pri istem sigma in drugi realiziaciji suma
         {
             Result result = RunExperiment(
                 reference, trueNormal, sigma, generator
             );
-
+            // Zbiranje napak vseh ponovitev
             sumAngle += result.angleError;
             sumAngleSquared += result.angleError * result.angleError;
-
             sumRMSE += result.rmse;
             sumCentroid += result.centroidError;
         }
-
+        // Povprecne napake rekonstrukcije
         double meanAngle = sumAngle / iterations;
         double meanRMSE = sumRMSE / iterations;
         double meanCentroid = sumCentroid / iterations;
 
         // Vzorcna varianca kotne napake
-        double variance =
-            (sumAngleSquared - iterations * meanAngle * meanAngle)
-            / (iterations - 1);
+        double variance = (sumAngleSquared - iterations * meanAngle * meanAngle)/ (iterations - 1);
 
         double stdAngle = std::sqrt(std::max(0.0, variance));
 
