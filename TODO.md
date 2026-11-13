@@ -1,9 +1,12 @@
-## TODO
-- add cube and RANSAC - check other algos
-- Overview of ROS2 tools like  Nav2, MoveIt... - complete guide where to start
-- mapping in Nav2
-- SLAM start in Nav2 -> PCA and RANSAC
-- Actual data Overview
-- Trajktorija za scan okolice - zajem slik in poze - gradnja mape 3d    
-- kaj rabimo za Docker Image
-- prihodnje pa na podlagi abs poz init vemo kje se nahaja in vemo flange kje je cam in s tem potem zgradimo skupaj slike - pred tem moramo iz staticne slike zgradit nek plane in objekte potem pa lahko gremo na to kaj pravim
+
+# TODO
+
+- Nova tehnična dokumentacija (README): matematika PCA/RANSAC, sintetični eksperimenti, RealSense D455, rezultati in omejitve.
+- Ponoviti matematiko in razumeti celoten C++ pipeline, od globinske slike do 3D-rekonstrukcije in segmentacije.
+- Pripraviti predstavitev trenutnih rezultatov, ROS 2 arhitekture in načrta razvoja za naslednji mesec.
+- Če ostane čas: načrtovati krožno trajektorijo manipulatorja, zajem globinskih slik in pripadajočih poz.
+- Kalibracija D455: intrinzični parametri, globinska skala in hand–eye transformacija.
+- ROS 2 integracija: RealSense, TF2, MoveIt 2, ros2_control, RViz in rosbag2.
+- Večpogledna 3D-rekonstrukcija: transformacija oblakov iz koordinatnega sistema kamere v bazo robota in združevanje v skupno mapo.
+- Validacija rekonstrukcije: natančnost, prekrivanje posnetkov, šum in manjkajoče globinske meritve.
+- Kasneje: ICP/registracija, lokalizacija, SLAM in Docker za ponovljivo razvojno okolje.

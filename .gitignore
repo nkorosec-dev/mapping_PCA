@@ -1,5 +1,4 @@
 build/
-buid/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
@@ -13,17 +12,16 @@ __pycache__/
 .vscode/
 .idea/
 
-Dataset/
-Datasets/
+/Dataset/
+/Datasets/
+
+/data/generated/
+
+/results/archive/
 
 *.o
 *.so
 *.exe
-
-measured.csv
-reference.csv
-plane_fit.csv
-monte_carlo_noise.csv
 
 *.log
 *.tmp
