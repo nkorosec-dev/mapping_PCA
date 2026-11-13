@@ -20,4 +20,4 @@ For a 2 × 2 m plane containing 1,681 points, with Gaussian noise (σ = 100 mm) 
 | Point-to-plane RMSE |   99.65 mm |
 | Centroid errorSLAM  |    4.08 mm |
 
-![graph](graph.png)
+![graph](Results/graph.png)

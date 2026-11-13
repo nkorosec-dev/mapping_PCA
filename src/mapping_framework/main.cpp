@@ -1,255 +1,91 @@
+#include "mapping.hpp"
+
 #include <iostream>
-#include <fstream>
-#include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <numbers>
-#include <vector>
-#include <random>
 #include <algorithm>
 #include <cmath>
 
-
-struct Result
-{
-    double angleError;
-    double rmse;
-    double centroidError;
-};
-
-std::vector<Eigen::Vector3d> PointGen(double step, int N);
-void TransformPoints(std::vector<Eigen::Vector3d> &points, const Eigen::Matrix3d &R, const Eigen::Vector3d &T);
-void SaveCSV(std::vector<Eigen::Vector3d> &points, const std::string filename);
-void AddGausNoise(std::vector<Eigen::Vector3d> &points, double sigma, std::mt19937 &generator);
-Eigen::Vector3d CalcCentroid(const std::vector<Eigen::Vector3d> &points);
-Eigen::Matrix3d CalcCovariance(const std::vector<Eigen::Vector3d> &points, const Eigen::Vector3d &centroid);
-double CalcRMSE(const std::vector<Eigen::Vector3d> &points, const Eigen::Vector3d &normal, double d);
-Result RunExperiment(const std::vector<Eigen::Vector3d> &reference, const Eigen::Vector3d &trueNormal, double sigma, std::mt19937 &generator, bool saveData = false);
-void MonteCarloNoise(const std::vector<Eigen::Vector3d>& reference, const Eigen::Vector3d& trueNormal, const std::vector<double>& sigmas, int iterations, std::mt19937& generator);
-
-
 int main()
 {
-    const double step = 0.05; // v m
-    const int N = 40;
+    const double step = 0.01;
+    const int N = static_cast<int>(std::round(2.0 / step));
+    const int cubeN = static_cast<int>(std::round(0.4 / step));
 
-    double rx = 6.1 * std::numbers::pi / 180.0;
-    double ry = 12.3 * std::numbers::pi / 180.0;
+    std::mt19937 generator(std::random_device{}());
 
-    auto generator = std::mt19937(42); //random seed for gaussian noise
-
-    Eigen::Vector3d trans(0.02, 0.13, 0.07);
-
-    auto points = PointGen(step, N);
+    const double rx = 6.1 * std::numbers::pi / 180.0;
+    const double ry = 12.3 * std::numbers::pi / 180.0;
 
     Eigen::Matrix3d Rx = Eigen::AngleAxisd(rx, Eigen::Vector3d::UnitX()).toRotationMatrix();
     Eigen::Matrix3d Ry = Eigen::AngleAxisd(ry, Eigen::Vector3d::UnitY()).toRotationMatrix();
 
     Eigen::Matrix3d R = Ry * Rx;
+    Eigen::Vector3d T(0.02, 0.13, 0.07);
 
+    auto reference = PointGen(step, N);
+    TransformPoints(reference, R, T);
 
-    TransformPoints(points, R, trans);
-
-    auto reference = points;
-
-    Eigen::Vector3d trueNormal = R * Eigen::Vector3d::UnitZ(); //known
+    Eigen::Vector3d trueNormal = R * Eigen::Vector3d::UnitZ();
 
     SaveCSV(reference, "reference.csv");
 
-    //Result single = RunExperiment(reference, trueNormal, 0.1, generator, true);
+    RunExperiment(reference, trueNormal, 0.1, generator, true);
 
-    std::vector<double> sigmas = {0.0, 0.005, 0.01, 0.03, 0.05, 0.1};
-
+    std::vector<double> sigmas = {0, 0.005, 0.01, 0.03, 0.05, 0.1, 0.2};
     MonteCarloNoise(reference, trueNormal, sigmas, 100, generator);
 
+    auto cube = CubeGen(step, cubeN, 1.3, 1.3);
+    TransformPoints(cube, R, T);
+
+    auto scene = reference;
+    scene.insert(scene.end(), cube.begin(), cube.end());
+
+    AddGausNoise(scene, 0.01, generator);
+    SaveCSV(scene, "scene.csv");
+
+    PlaneModel globalPlane = FitPlanePCA(scene);
+    PlaneModel ransacPlane = RansacPlane(scene, 300, 0.03, generator);
+
+    if (ransacPlane.inliers.size() < 3)
+    {
+        std::cerr << "RANSAC failed.\n";
+        return 1;
+    }
+
+    auto angleError = [&](const Eigen::Vector3d& normal)
+    {
+        double dot = std::clamp(std::abs(normal.dot(trueNormal)), 0.0, 1.0);
+        return std::acos(dot) * 180.0 / std::numbers::pi;
+    };
+
+    std::vector<bool> isInlier(scene.size(), false);
+
+    for (int index : ransacPlane.inliers)
+        isInlier[index] = true;
+
+    std::vector<Eigen::Vector3d> planePoints, objectPoints;
+
+    for (size_t i = 0; i < scene.size(); i++)
+    {
+        if (isInlier[i])
+            planePoints.push_back(scene[i]);
+        else
+            objectPoints.push_back(scene[i]);
+    }
+
+    SaveCSV(planePoints, "ransac_inliers.csv");
+    SaveCSV(objectPoints, "ransac_outliers.csv");
+
+    std::cout << "\n--- PLANE + CUBE ---\n";
+    std::cout << "Total points: " << scene.size() << "\n";
+    std::cout << "Plane points: " << planePoints.size() << "\n";
+    std::cout << "Object points: " << objectPoints.size() << "\n";
+    std::cout << "Global PCA error: " << angleError(globalPlane.normal) << " deg\n";
+    std::cout << "RANSAC error: " << angleError(ransacPlane.normal) << " deg\n";
+    std::cout << "RANSAC RMSE: "
+              << CalcRMSE(planePoints, ransacPlane.normal, ransacPlane.d) * 1000
+              << " mm\n";
+
     return 0;
-    }
-
-std::vector<Eigen::Vector3d> PointGen(double step, int N) //2D plane generate
-{
-    std::vector<Eigen::Vector3d> points;
-
-    points.reserve((N+1)*(N+1));
-
-    for (int i = 0; i <= N; i++)
-    {
-        for(int j = 0; j <= N; j++)
-        {   
-            Eigen::Vector3d point(i*step, j*step, 0.0);
-
-            points.push_back(point);
-        }
-    }
-    return points;
-}
-
-void TransformPoints(std::vector<Eigen::Vector3d> &points, const Eigen::Matrix3d &R, const Eigen::Vector3d &T)
-{
-    for(auto &point : points)
-    {
-        point = R * point + T;
-    }
-}
-
-void SaveCSV(std::vector<Eigen::Vector3d> &points, const std::string filename)
-{
-    std::ofstream file(filename);
-
-    file << "x,y,z\n";
-
-    for(const auto &point : points)
-    {
-        file << point.x() << "," << point.y() << "," << point.z() << "\n";
-    }
-
-}
-
-void AddGausNoise(std::vector<Eigen::Vector3d> &points, double sigma, std::mt19937 &generator)
-{
-    std::normal_distribution<double> noise(0.0, sigma); 
-
-    for(auto &point : points) //dodam pseudoreandom sum
-    {
-        point.x() += noise(generator);
-        point.y() += noise(generator);
-        point.z() += noise(generator);        
-    }
-
-}
-
-Eigen::Vector3d CalcCentroid(const std::vector<Eigen::Vector3d> &points)
-{
-    Eigen::Vector3d centroid = Eigen::Vector3d::Zero(); 
-
-    for(const auto &point : points)
-    {
-        centroid += point; 
-    }
-
-    return centroid/static_cast<double>(points.size()); //povprecni polozaj vseh tock
-
-}
-
-Eigen::Matrix3d CalcCovariance(const std::vector<Eigen::Vector3d> &points, const Eigen::Vector3d &centroid)
-{   
-    Eigen::Matrix3d C = Eigen::Matrix3d::Zero();
-
-    for(const auto &point : points)
-    {
-        Eigen::Vector3d q = point - centroid; //q pove koliko je posamezna tocka odmaknjena od tezisca
-
-        C += q * q.transpose(); //zunanji produkt - kolk ima posamezna tocka prispevka, varianca in kovarianca
-    
-    }    
-    C /= static_cast<double>(points.size()); //kovariancna matrika, poveprecje prispevka veh tock
-
-    return C;
-}
-
-double CalcRMSE(const std::vector<Eigen::Vector3d> &points, const Eigen::Vector3d &normal, double d)
-{
-    double sum = 0;
-
-    for (const auto &point : points)
-    {
-        double error = normal.dot(point) + d; //skalarni produkt normale in tocke - pove kam kazze vektor glede na drugega
-        sum += error*error; //kvadraten odmik - navadno povprecje bi dobili 0 - kvadrirano zato potem korenimo
-    }
-    
-    return std::sqrt(sum/ static_cast<double>(points.size())); //Root Mean Squared Error.
-}
-
-Result RunExperiment(const std::vector<Eigen::Vector3d> &reference, const Eigen::Vector3d &trueNormal, double sigma, std::mt19937 &generator, bool saveData)
-{
-    auto measured = reference; //kopija
-
-    AddGausNoise(measured, sigma, generator); //dodan šum
-
-    if(saveData)
-    {
-        SaveCSV(measured, "measured.csv");
-    }
-
-    auto estimated = CalcCentroid(measured); //tezisce izmerjene
-    auto actual = CalcCentroid(reference); //actual tezisce
-
-    Eigen::Matrix3d C = CalcCovariance(measured, estimated); // kovarianca matrika
-
-    //PCA rekonstrukcija
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(C); //lastni razcep simetricne kovariancne matrike - po velikosti zloozi lastne vektorje
-    Eigen::Vector3d normal = solver.eigenvectors().col(0); //najmanj razpersenosti v prvem stolpcu
-
-    double dot = std::abs(trueNormal.dot(normal)); //skalarni produkt enotskih normal
-    dot = std::clamp(dot, 0.0, 1.0); //omejitev za acos()
-
-    double angleError = std::acos(dot) * 180.0 / std::numbers::pi; //kot med normalama
-
-    double d = -normal.dot(estimated); //d polozaj ravninve glede na izhodisce
-
-    double rmse = CalcRMSE(measured, normal, d); 
-
-    double centroidError = (estimated - actual).norm();
-
-    if (saveData)
-    {
-        std::ofstream file("plane_fit.csv");
-
-        file << "nx,ny,nz,d,angle_error_deg,rmse,centroid_error\n";
-
-        file << normal.x() << ","
-            << normal.y() << ","
-            << normal.z() << ","
-            << d << ","
-            << angleError << ","
-            << rmse << ","
-            << centroidError << "\n";
-    }
-
-    return {angleError, rmse, centroidError};
-}
-
-void MonteCarloNoise(const std::vector<Eigen::Vector3d>& reference, const Eigen::Vector3d& trueNormal, const std::vector<double>& sigmas, int iterations, std::mt19937& generator)
-{
-    std::ofstream file("monte_carlo_noise.csv");
-
-    file << "sigma,mean_angle,std_angle,mean_rmse,mean_centroid\n";
-
-    for (double sigma : sigmas) // spreminja gaussov sum
-    {
-        double sumAngle = 0.0;
-        double sumAngleSquared = 0.0;
-        double sumRMSE = 0.0;
-        double sumCentroid = 0.0;
-
-        for (int i = 0; i < iterations; i++) // rekonstrukcija pri istem sigma in drugi realiziaciji suma
-        {
-            Result result = RunExperiment(
-                reference, trueNormal, sigma, generator
-            );
-            // Zbiranje napak vseh ponovitev
-            sumAngle += result.angleError;
-            sumAngleSquared += result.angleError * result.angleError;
-            sumRMSE += result.rmse;
-            sumCentroid += result.centroidError;
-        }
-        // Povprecne napake rekonstrukcije
-        double meanAngle = sumAngle / iterations;
-        double meanRMSE = sumRMSE / iterations;
-        double meanCentroid = sumCentroid / iterations;
-
-        // Vzorcna varianca kotne napake
-        double variance = (sumAngleSquared - iterations * meanAngle * meanAngle)/ (iterations - 1);
-
-        double stdAngle = std::sqrt(std::max(0.0, variance));
-
-        std::cout << "\nSigma: " << sigma << " m\n";
-        std::cout << "Mean angle: " << meanAngle << " deg\n";
-        std::cout << "Std angle: " << stdAngle << " deg\n";
-        std::cout << "Mean RMSE: " << meanRMSE << " m\n";
-
-        file << sigma << ","
-             << meanAngle << ","
-             << stdAngle << ","
-             << meanRMSE << ","
-             << meanCentroid << "\n";
-    }
 }
